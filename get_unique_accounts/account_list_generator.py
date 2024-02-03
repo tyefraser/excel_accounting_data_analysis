@@ -2,51 +2,15 @@ import pandas as pd
 import os
 import logging
 import logging.config
-import yaml
 from datetime import datetime
 from openpyxl import Workbook
+from contextlib import contextmanager
 
 from utils import absolute_path
-
-def setup_logging(default_path='../logging_config.yaml', default_level=logging.INFO, env_key='LOG_CFG'):
-    """
-    Setup logging configuration
-    """
-    path = default_path
-    value = os.getenv(env_key, None)
-    if value:
-        path = value
-    if os.path.exists(path):
-        logging.info('Running yaml logger')
-        with open(path, 'rt') as f:
-            config = yaml.safe_load(f.read())
-        logging.config.dictConfig(config)
-    else:
-        logging.info('Running default logger, not from the yaml')
-        logging.basicConfig(level=default_level)
-
-# Set up logging using the configuration file
-setup_logging()
+from utils import assert_file_extension
 
 # Create a logger variable
 logger = logging.getLogger(__name__)
-
-
-def assert_file_extension(
-        file_name,
-        expected_extension: str = '.xlsx',
-):
-    logger.debug('\n\n\nRunning: assert_file_extension')
-
-    file_extension=os.path.splitext(file_name)[1]
-    try:
-        assert (file_extension == expected_extension), (
-            f"Incorrect file extension, expecting '{expected_extension}' but got '{file_extension}'"
-        )
-        return True        
-    except AssertionError as e:
-        logger.info(f"AssertionError: {e}")
-        raise AssertionError(f"AssertionError: {e}")
 
 def read_sheets_as_df(xls):
     logger.debug('\n\n\nRunning: read_sheets_as_df')
@@ -281,51 +245,56 @@ def correctly_ordered_list(
             
     return ordered_account_list
 
-def document_account_lists(
-        ordered_account_list,
-        account_lists_dict,
-):
-    logger.debug('\n\n\nRunning: document_account_lists')
 
-    # Create workbook
+
+@contextmanager
+def openpyxl_context_manager(file_path):
     wb = Workbook()
+    try:
+        yield wb
+    finally:
+        wb.save(file_path)
 
-    # Delete the default 'Sheet' if it exists
-    default_sheet = wb['Sheet']
-    if default_sheet:
-        wb.remove(default_sheet)
+def document_account_lists(ordered_account_list, account_lists_dict):
+    logger.debug('\n\n\nRunning: document_account_lists')
 
     # Specify the sheet title
     sheet_title = 'MyAccountsSheet'
 
-    # Activate the sheet by title or create a new one if it doesn't exist
-    ws = wb[sheet_title] if sheet_title in wb.sheetnames else wb.create_sheet(title=sheet_title)
-
-
     # Add in the ordered account list
-    ws.cell(row=1, column=1, value='Accounts List - Compelete')
-    for index, account in enumerate(ordered_account_list):
-        ws.cell(row=index+2, column=1, value=account)
+    excel_file_name=f'Ordered_Accounts_{datetime.now().strftime("%Y_%m_%d_at_%I_%M%p_")}.xlsx'
+    logger.debug(f'excel_file_name:{excel_file_name}')
+    excel_file_path=absolute_path('results/' + excel_file_name)
+    logger.debug(f'excel_file_path:{excel_file_path}')
+    
+    with openpyxl_context_manager(absolute_path(f'get_unique_accounts/results/Ordered_Accounts_{datetime.now().strftime("%Y_%m_%d_at_%I_%M%p_")}.xlsx')) as wb:
+        # Delete the default 'Sheet' if it exists
+        default_sheet = wb['Sheet']
+        if default_sheet:
+            wb.remove(default_sheet)
 
+        # Activate the sheet by title or create a new one if it doesn't exist
+        ws = wb[sheet_title] if sheet_title in wb.sheetnames else wb.create_sheet(title=sheet_title)
 
-    # Iterate over the account lists add accounts in the order and position of the ordered list.
-    for list_index, account_list_name in enumerate(list(account_lists_dict.keys())):
-        # Get column position for current list
-        col_pos=list_index+2
+        ws.cell(row=1, column=1, value='Accounts List - Complete')
+        for index, account in enumerate(ordered_account_list):
+            ws.cell(row=index + 2, column=1, value=account)
 
-        # Add the account name as the heading
-        ws.cell(row=1, column=col_pos, value=account_list_name)
-        
-        # Add in the accounts through the order of the ordered_account_list
-        current_account_list=account_lists_dict[account_list_name]
-        for row_index, account in enumerate(ordered_account_list):
-            if account in current_account_list:
-                ws.cell(row=row_index+2, column=col_pos, value=account)
+        # Iterate over the account lists add accounts in the order and position of the ordered list.
+        for list_index, account_list_name in enumerate(list(account_lists_dict.keys())):
+            # Get column position for the current list
+            col_pos = list_index + 2
 
-    excel_file_name = absolute_path(f'results/Ordered_Accounts_{datetime.now().strftime("%Y_%m_%d_at_%I_%M%p_")}.xlsx')
-    wb.save(excel_file_name)
+            # Add the account name as the heading
+            ws.cell(row=1, column=col_pos, value=account_list_name)
 
-    logger.info(f'Excel saved as: {excel_file_name}')
+            # Add in the accounts through the order of the ordered_account_list
+            current_account_list = account_lists_dict[account_list_name]
+            for row_index, account in enumerate(ordered_account_list):
+                if account in current_account_list:
+                    ws.cell(row=row_index + 2, column=col_pos, value=account)
+
+        logger.info(f'Excel saved as: {excel_file_name}')
 
 def main(
         file_name: str = "account_lists_single_tst.xlsx",
